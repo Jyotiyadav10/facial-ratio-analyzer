@@ -1,0 +1,92 @@
+import cv2
+import mediapipe as mp
+import numpy as np
+
+mp_face_mesh = mp.solutions.face_mesh
+face_mesh = mp_face_mesh.FaceMesh(static_image_mode=False, refine_landmarks=True)
+
+cap = cv2.VideoCapture(0)
+
+def distance(p1, p2):
+    return np.linalg.norm(np.array(p1) - np.array(p2))
+
+while True:
+    ret, frame = cap.read()
+    if not ret:
+        break
+
+    h, w, _ = frame.shape
+    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    results = face_mesh.process(rgb_frame)
+
+    if results.multi_face_landmarks:
+        for landmarks in results.multi_face_landmarks:
+            coords = [(int(lm.x * w), int(lm.y * h)) for lm in landmarks.landmark]
+
+            # Landmark mappings
+            intertemporal_L, intertemporal_R = coords[127], coords[356]
+            intercanthal_L, intercanthal_R = coords[133], coords[362]
+            intercheilion_L, intercheilion_R = coords[61], coords[291]
+            interalae_L, interalae_R = coords[98], coords[327]
+            interdacryon_L, interdacryon_R = coords[168], coords[397]
+            nose_L, nose_R = coords[49], coords[279]
+            forehead_top = coords[10]
+            stomion = coords[0]
+            soft_menton = coords[152]
+            intereye_L, intereye_R = coords[33], coords[263]
+            interalae_mid = ((interalae_L[0]+interalae_R[0])//2, (interalae_L[1]+interalae_R[1])//2)
+
+            # Ratios list: ((p1, p2), (p3, p4), ideal)
+            ratio_data = [
+                (intertemporal_L, intertemporal_R, intercanthal_L, intercanthal_R, 1.314),
+                (intercanthal_L, intercanthal_R, intercheilion_L, intercheilion_R, 1.852),
+                (interalae_L, interalae_R, interdacryon_L, interdacryon_R, 1.099),
+                (interalae_L, interalae_R, nose_L, nose_R, 2.026),
+                (intercheilion_L, intercheilion_R, interdacryon_L, interdacryon_R, 1.479),
+                (intercheilion_L, intercheilion_R, interalae_L, interalae_R, 1.390),
+                (forehead_top, interalae_mid, intereye_L, interalae_L, 1.410),
+                (forehead_top, interalae_mid, stomion, soft_menton, 1.346),
+                (interalae_mid, soft_menton, stomion, soft_menton, 1.699),
+                (intereye_L, interalae_L, interalae_L, stomion, 1.357),
+                (intereye_L, soft_menton, intereye_L, stomion, 1.540),
+                (intereye_L, soft_menton, intereye_L, stomion, 1.613)
+            ]
+
+            total_score = 0
+            for i, (p1, p2, p3, p4, ideal) in enumerate(ratio_data, start=1):
+                val = distance(p1, p2) / distance(p3, p4)
+                score = (1 - abs(val - ideal) / ideal) * 100
+                total_score += score
+
+                # Draw lines
+                cv2.line(frame, p1, p2, (0, 255, 255), 1)
+                cv2.line(frame, p3, p4, (255, 0, 0), 1)
+
+                # Display ratio on frame
+                mid_x = (p1[0] + p2[0]) // 2
+                mid_y = (p1[1] + p2[1]) // 2
+                cv2.putText(frame, f"R{i}:{val:.2f}", (mid_x, mid_y),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 1)
+
+            avg_score = total_score / len(ratio_data)
+
+            # Look category
+            if avg_score < 85:
+                look_text = "Bad Look 😕"
+                color = (0, 0, 255)
+            elif avg_score < 95:
+                look_text = "Average Look 😐"
+                color = (0, 255, 255)
+            else:
+                look_text = "Nice Look 😊"
+                color = (0, 255, 0)
+
+            cv2.putText(frame, f"Overall Score: {avg_score:.1f}% - {look_text}",
+                        (10, h - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+
+    cv2.imshow("Facial Ratios & Score", frame)
+    if cv2.waitKey(1) & 0xFF == 27:
+        break
+
+cap.release()
+cv2.destroyAllWindows()
